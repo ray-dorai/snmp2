@@ -10,6 +10,8 @@ pub mod mibs;
 pub mod pdu;
 pub mod snmp;
 mod syncsession;
+pub mod helpers;
+
 #[cfg(feature = "v3")]
 pub mod v3;
 pub use syncsession::SyncSession;
@@ -17,6 +19,9 @@ pub use syncsession::SyncSession;
 mod asyncsession;
 #[cfg(feature = "tokio")]
 pub use asyncsession::AsyncSession;
+
+// Re-export helper utilities for convenience
+pub use helpers::{parse_oid, SessionExt, ValueExt, SnmpClient};
 
 pub use pdu::Pdu;
 
