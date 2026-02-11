@@ -1,7 +1,7 @@
 
 Dependency-free basic SNMP v1/v2/v3 client in Rust, forked from [snmp2](https://github.com/roboplc/snmp2), which is focused on programmable logic controllers.
 
-This fork is focused on wireless networking equipment.
+This fork is focused on **wireless networking equipment**.
 
 
 ## Quick start
