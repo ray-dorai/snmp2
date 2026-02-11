@@ -108,7 +108,7 @@ parse_mac(b"aabbccddeeff");
 // -> Some("aa:bb:cc:dd:ee:ff")
 ```
 
-There's also `format_mac(&[u8])` for raw bytes to `aa:bb:cc:dd:ee:ff`, and `format_mac_dashed` for `aa-bb-cc-dd-ee-ff` (Cambium CBRS style).
+There's also `format_mac(&[u8])` for raw bytes to `aa:bb:cc:dd:ee:ff`, and `format_mac_dashed` for `aa-bb-cc-dd-ee-ff`.
 
 ## Distance conversion
 
@@ -167,7 +167,7 @@ fn scrape_airos_children(ip: &str, community: &[u8]) {
 ```
 
 
-## Copyright
+## Copyright for RUST SNMP2
 
 Copyright 2016-2018 Hroi Sigurdsson
 
