@@ -1,236 +1,171 @@
-<h2>
-  RUST-SNMP
-  <a href="https://crates.io/crates/snmp2"><img alt="crates.io page" src="https://img.shields.io/crates/v/snmp2.svg"></img></a>
-  <a href="https://docs.rs/snmp2"><img alt="docs.rs page" src="https://docs.rs/snmp2/badge.svg"></img></a>
-  <a href="https://github.com/roboplc/snmp2/actions/workflows/ci.yml">
-    <img alt="GitHub Actions CI" src="https://github.com/roboplc/snmp2/actions/workflows/ci.yml/badge.svg"></img>
-  </a>
-</h2>
 
-Dependency-free basic SNMP v1/v2/v3 client in Rust.
+Dependency-free basic SNMP v1/v2/v3 client in Rust, forked from [snmp2]([https://crates.io/crates/snmp](https://github.com/roboplc/snmp2)), which is focused on programmable logic controllers.
 
-This is a fork of the original [snmp](https://crates.io/crates/snmp) crate
-which has been abandoned long time ago.
+This fork is focused on wireless networking equipment.
 
-SNMP2 is a part of [RoboPLC](https://www.roboplc.com) project.
 
-New features added to the fork:
+## Quick start
 
-- SNMP v1 support (including v1 traps)
-- SNMP v3 authentication (MD5, SHA1, SHA224, SHA256, SHA384, SHA512)
-- SNMP v3 privacy (DES, AES128, AES192, AES256)
-- MIBs support (requires `mibs` feature and `libnetsnmp` library installed)
-- Async session (requires `tokio` feature)
-- Crate code has been refactored and cleaned up
-- OIDs have been migrated to
-  [asn1](https://docs.rs/asn1-rs/latest/asn1_rs/struct.Oid.html)
-- Improved PDU API, added trap handling examples
+Get a single value from a device:
 
-Supports:
+```rust
+use snmp2::{oid, SnmpClient};
 
-- GET
-- GETNEXT
-- GETBULK
-- SET
-- Basic SNMP v1/v2 types
-- Synchronous/Asynchronous requests
-- UDP transport
-- MIBs (with `mibs` feature, requires `libnetsnmp`)
-- SNMP v3 (requires `v3` feature)
+fn main() -> Result {
+    let client = SnmpClient::new("10.56.27.13:161", b"public");
 
-# Examples
+    let freq = client.get(&oid!("1.3.6.1.4.1.161.19.3.1.7.37"))?;
+    println!("Frequency: {}", freq);
 
-## GET NEXT
-
-```rust,no_run
-use std::time::Duration;
-use snmp2::{SyncSession, Value, Oid};
-
-let sys_descr_oid = Oid::from(&[1,3,6,1,2,1,1,1,]).unwrap();
-let agent_addr    = "198.51.100.123:161";
-let community     = b"f00b4r";
-let timeout       = Duration::from_secs(2);
-
-let mut sess = SyncSession::new_v2c(agent_addr, community, Some(timeout), 0).unwrap();
-let mut response = sess.getnext(&sys_descr_oid).unwrap();
-if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
-    println!("myrouter sysDescr: {}", String::from_utf8_lossy(sys_descr));
+    Ok(())
 }
 ```
 
-## GET BULK
+Walk a table (e.g. list all connected subscribers on an AP):
 
-```rust,no_run
-use std::time::Duration;
-use snmp2::{SyncSession, Oid};
+```rust
+use snmp2::{oid, SnmpClient, parse_mac};
 
-let system_oid      = Oid::from(&[1,3,6,1,2,1,1,]).unwrap();
-let agent_addr      = "[2001:db8:f00:b413::abc]:161";
-let community       = b"f00b4r";
-let timeout         = Duration::from_secs(2);
-let non_repeaters   = 0;
-let max_repetitions = 7; // number of items in "system" OID
+fn main() -> Result {
+    let client = SnmpClient::new("10.56.27.13:161", b"public");
 
-let mut sess = SyncSession::new_v2c(agent_addr, community, Some(timeout), 0).unwrap();
-let response = sess.getbulk(&[&system_oid], non_repeaters, max_repetitions).unwrap();
+    let ips  = client.walk(&oid!("1.3.6.1.4.1.41112.1.4.7.1.10"))?;
+    let macs = client.walk_bytes(&oid!("1.3.6.1.4.1.41112.1.4.7.1.1"))?;
 
-for (name, val) in response.varbinds {
-    println!("{} => {:?}", name, val);
+    for (ip, mac_bytes) in ips.iter().zip(macs.iter()) {
+        let mac = parse_mac(mac_bytes).unwrap_or_default();
+        println!("{} - {}", ip, mac);
+    }
+
+    Ok(())
+}
+
+## Getting data out
+
+There are a few ways to read values depending on what you need:
+
+| Method | Returns | Use when |
+|--------|---------|----------|
+| `client.get(&oid)` | `String` | You just need text (IPs, names, frequencies) |
+| `client.get_value(&oid)` | `OwnedValue` | You need the actual SNMP type (integer, bytes, etc.) |
+| `client.walk(&oid)` | `Vec<String>` | Walking a table, text values are fine |
+| `client.walk_bytes(&oid)` | `Vec<Vec<u8>>` | Walking a table with binary data (MACs) |
+| `client.walk_values(&oid)` | `Vec<(Oid, OwnedValue)>` | You need both the OID and typed value |
+
+### Typed values
+
+`OwnedValue` keeps the original SNMP type so you can pull out exactly what you need:
+
+```rust
+use snmp2::{oid, SnmpClient};
+
+let client = SnmpClient::new("10.56.27.13:161", b"public");
+let value = client.get_value(&oid!("1.3.6.1.4.1.161.19.3.1.7.37"))?;
+
+if let Some(freq) = value.as_i64() {
+    println!("Frequency: {} kHz", freq);
 }
 ```
 
-## SET
+Methods on `OwnedValue`: `as_i64()`, `as_u64()`, `as_bytes()`, `as_str()`, `as_ipv4()`, `is_error()`, `to_string_lossy()`.
 
-```rust,no_run
-use std::time::Duration;
-use snmp2::{SyncSession, Value, Oid};
+## OIDs
 
-let syscontact_oid  = Oid::from(&[1,3,6,1,2,1,1,4,0]).unwrap();
-let contact         = Value::OctetString(b"Thomas A. Anderson");
-let agent_addr      = "[2001:db8:f00:b413::abc]:161";
-let community       = b"f00b4r";
-let timeout         = Duration::from_secs(2);
+Use the `oid!` macro for hardcoded OIDs. It panics on typos so you catch mistakes early:
 
-let mut sess = SyncSession::new_v2c(agent_addr, community, Some(timeout), 0).unwrap();
-let response = sess.set(&[(&syscontact_oid, contact)]).unwrap();
+```rust
+use snmp2::oid;
 
-assert_eq!(response.error_status, snmp2::snmp::ERRSTATUS_NOERROR);
-for (name, val) in response.varbinds {
-    println!("{} => {:?}", name, val);
-}
+let freq_oid  = oid!("1.3.6.1.4.1.41112.1.4.1.1.4");
+let freq_oid2 = oid!(".1.3.6.1.4.1.41112.1.4.1.1.4");  // leading dot is fine
 ```
 
-## TRAPS
+If you're building OIDs from user input, use `parse_oid()` which returns a `Result` instead:
 
-```rust,no_run
-use std::net::UdpSocket;
-use snmp2::Pdu;
+```rust
+use snmp2::parse_oid;
 
-let socket = UdpSocket::bind("0.0.0.0:1162").expect("Could not bind socket");
-loop {
-    let mut buf = [0; 1500];
-    let size = socket.recv(&mut buf).expect("Could not receive data");
-    let data = &buf[..size];
-    let pdu = Pdu::from_bytes(data).expect("Could not parse PDU");
-    println!("Version: {}", pdu.version().unwrap());
-    println!("Community: {}", std::str::from_utf8(pdu.community).unwrap());
-    for (name, value) in pdu.varbinds {
-        println!("{}={:?}", name, value);
+let oid = parse_oid("1.3.6.1.2.1.1.1.0")?;
+```
+
+## MAC addresses
+
+SNMP devices return MACs in all sorts of formats. `parse_mac` handles the common ones:
+
+```rust
+use snmp2::parse_mac;
+
+// Raw 6 bytes (most common from SNMP walks)
+parse_mac(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+// -> Some("aa:bb:cc:dd:ee:ff")
+
+// Already formatted string
+parse_mac(b"AA:BB:CC:DD:EE:FF");
+// -> Some("aa:bb:cc:dd:ee:ff")
+
+// Hex string
+parse_mac(b"aabbccddeeff");
+// -> Some("aa:bb:cc:dd:ee:ff")
+```
+
+There's also `format_mac(&[u8])` for raw bytes to `aa:bb:cc:dd:ee:ff`, and `format_mac_dashed` for `aa-bb-cc-dd-ee-ff` (Cambium CBRS style).
+
+## Distance conversion
+
+Wireless radios report distance in different units. Two helpers for the common conversions:
+
+```rust
+use snmp2::{meters_to_miles, bits_to_miles};
+
+// Ubiquiti/ePMP: distance in meters
+let miles = meters_to_miles(1609.344);  // -> 1.0
+
+// Cambium FSK/PMP: distance in "bits" (bits * 49.25 * 0.304 = meters)
+let miles = bits_to_miles(100);
+```
+
+## Lower-level access
+
+If you need more control (e.g. holding one session open for multiple calls), use `SyncSession` and `SessionExt` directly:
+
+```rust
+use snmp2::{SyncSession, SessionExt, parse_oid};
+
+let mut session = SyncSession::new_v2c("10.56.27.13:161", b"public", None, 0)?;
+
+let oid = parse_oid("1.3.6.1.4.1.41112.1.4.7.1.10")?;
+let ips = session.walk_strings(&oid)?;
+let values = session.walk_values(&oid)?;
+```
+
+## Full example: scraping an AirOS AP
+
+```rust
+use snmp2::{oid, SnmpClient, parse_mac, meters_to_miles};
+
+fn scrape_airos_children(ip: &str, community: &[u8]) {
+    let client = SnmpClient::new(&format!("{}:161", ip), community);
+
+    let ips       = client.walk(&oid!("1.3.6.1.4.1.41112.1.4.7.1.10")).unwrap_or_default();
+    let macs      = client.walk_bytes(&oid!("1.3.6.1.4.1.41112.1.4.7.1.1")).unwrap_or_default();
+    let names     = client.walk(&oid!("1.3.6.1.4.1.41112.1.4.7.1.2")).unwrap_or_default();
+    let distances = client.walk(&oid!("1.3.6.1.4.1.41112.1.4.7.1.5")).unwrap_or_default();
+
+    if ips.len() != macs.len() || ips.len() != names.len() || ips.len() != distances.len() {
+        println!("Table length mismatch, skipping {}", ip);
+        return;
+    }
+
+    for i in 0..ips.len() {
+        let mac = parse_mac(&macs[i]).unwrap_or_else(|| format!("Unknown-{}", i));
+        let dist: f64 = distances[i].parse().unwrap_or(0.0);
+
+        println!("{} | {} | {} | {:.3} mi",
+            ips[i], mac, names[i], meters_to_miles(dist));
     }
 }
 ```
 
-## Async session
-
-```rust,no_run
-use std::time::Duration;
-use snmp2::{AsyncSession, Value, Oid};
-
-async fn get_next() {
-    // timeouts should be handled by the caller with `tokio::time::timeout`
-    let sys_descr_oid = Oid::from(&[1,3,6,1,2,1,1,1,]).unwrap();
-    let agent_addr    = "198.51.100.123:161";
-    let community     = b"f00b4r";
-    let mut sess = AsyncSession::new_v2c(agent_addr, community, 0).await.unwrap();
-    let mut response = sess.getnext(&sys_descr_oid).await.unwrap();
-    if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
-        println!("myrouter sysDescr: {}", String::from_utf8_lossy(sys_descr));
-    }
-}
-```
-
-## Working with MIBs
-
-Prepare the system
-
-```shell
-apt-get install libsnmp-dev snmp-mibs-downloader
-```
-
-```rust,ignore
-use snmp2::{mibs::{self, MibConversion as _}, Oid};
-
-mibs::init(&mibs::Config::new().mibs(&["./ibmConvergedPowerSystems.mib"]))
-    .unwrap();
-let snmp_oid = Oid::from(&[1, 3, 6, 1, 4, 1, 2, 6, 201, 3]).unwrap();
-let name = snmp_oid.mib_name().unwrap();
-assert_eq!(name, "IBM-CPS-MIB::cpsSystemSendTrap");
-let snmp_oid2 = Oid::from_mib_name(&name).unwrap();
-assert_eq!(snmp_oid, snmp_oid2);
-```
-
-# SNMPv3
-
-* Requires `v3` crate feature.
-
-* All cryptographic algorithms are provided by [openssl](https://www.openssl.org/).
-
-* For authentication, supports: MD5 (RFC3414), SHA1 (RFC3414) and non-standard
-  SHA224, SHA256, SHA384, SHA512.
-
-* For privacy, supports: DES (RFC3414), AES128-CFB (RFC3826) and non-standard
-  AES192-CFB, AES256-CFB. Additional/different AES modes are not supported and
-  may require patching the crate.
-
-Note: DES legacy encryption may be disabled in openssl by default or even not
-supported at all. Refer to the library documentation how to enable it.
-
-## Example
-
-Authentication: SHA1, encryption: AES128-CFB
-
-```rust,no_run
-use snmp2::{SyncSession, v3, Oid};
-use std::time::Duration;
-
-// the security parameters also keep authoritative engine ID and boot/time
-// counters. these can be either set or resolved/updated automatically.
-let security = v3::Security::new(b"public", b"secure")
-    .with_auth_protocol(v3::AuthProtocol::Sha1)
-    .with_auth(v3::Auth::AuthPriv {
-        cipher: v3::Cipher::Aes128,
-        privacy_password: b"secure-encrypt".to_vec(),
-    });
-let mut sess =
-    SyncSession::new_v3("192.168.1.1:161", Some(Duration::from_secs(2)), 0, security).unwrap();
-// In case if engine_id is not provided in security parameters, it is necessary
-// to call init() method to send a blank unauthenticated request to the target
-// to get the engine_id.
-sess.init().unwrap();
-loop {
-    let res = match sess.get(&Oid::from(&[1, 3, 6, 1, 2, 1, 1, 3, 0]).unwrap()) {
-        Ok(r) => r,
-        // In case if the engine boot / time counters are not set in the security parameters or
-        // they have been changed on the target, e.g. after a reboot, the session returns
-        // an error with the AuthUpdated code. In this case, security parameters are automatically
-        // updated and the request should be repeated.
-        Err(snmp2::Error::AuthUpdated) => continue,
-        Err(e) => panic!("{}", e),
-    };
-    println!("{} {:?}", res.version().unwrap(), res.varbinds);
-    std::thread::sleep(Duration::from_secs(1));
-}
-```
-
-## Building
-
-In case of problems (e.g. with [cross-rs](https://github.com/cross-rs/cross)),
-add `openssl` with `vendored` feature:
-
-```shell
-cargo add openssl --features vendored
-```
-
-## FIPS-140 support
-
-The crate uses openssl cryptography only and becomes FIPS-140 compliant as soon
-as FIPS mode is activated in `openssl`. Refer to the
-[openssl crate](https://docs.rs/openssl) crate and
-[openssl library](https://www.openssl.org/) documentation for more details.
-
-## MSRV
-
-1.68.0
 
 ## Copyright
 
