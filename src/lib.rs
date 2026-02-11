@@ -21,7 +21,11 @@ mod asyncsession;
 pub use asyncsession::AsyncSession;
 
 // Re-export helper utilities for convenience
-pub use helpers::{parse_oid, SessionExt, ValueExt, SnmpClient};
+pub use helpers::{
+    parse_oid, SessionExt, ValueExt, SnmpClient, OwnedValue,
+    format_mac, format_mac_dashed, parse_mac,
+    meters_to_miles, bits_to_miles,
+};
 
 pub use pdu::Pdu;
 
@@ -328,7 +332,6 @@ pub struct Varbinds<'a> {
 
 impl fmt::Debug for Varbinds<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // f.debug_list().entries(self.clone()).finish()
         let mut ds = f.debug_struct("Varbinds");
         for (name, val) in self.clone() {
             ds.field(&format!("{}", name), &format!("{:?}", val));
